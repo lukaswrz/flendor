@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+
+set -o errexit
+set -o nounset
+set -o pipefail
+
+progname=$0
+
+warn() {
+    local line
+    for line in "$@"; do
+        echo "$progname: $line" 1>&2
+    done
+}
+
+error() {
+    warn "$@"
+
+    exit 1
+}
+
+args=$(
+    getopt \
+        --options t:rv \
+        --longoptions vendor:,refresh,verbose \
+        --name "$progname" \
+        -- "$@"
+)
+
+eval set -- "$args"
+
+nixflags=()
+rmflags=()
+mkdirflags=()
+cpflags=()
+prefetchflags=()
+verbose=false
+while true; do
+    case $1 in
+    -d | --vendor)
+        vendor=$2
+        shift 2
+        ;;
+    -r | --refresh)
+        prefetchflags+=(--refresh)
+        shift
+        ;;
+    -v | --verbose)
+        nixflags+=(--verbose)
+        rmflags+=(--verbose)
+        mkdirflags+=(--verbose)
+        cpflags+=(--verbose)
+        verbose=true
+        shift
+        ;;
+    --)
+        shift
+        break
+        ;;
+    esac
+done
+
+if (($# > 0)); then
+    error 'too many arguments'
+fi
+
+json=$(< flendor.json)
+
+if [[ ! -v vendor ]]; then
+    vendor=$(jq --exit-status --raw-output '.vendor' <<<"$json")
+fi
+
+while IFS= read -r k; do
+    name=$(jq --null-input --argjson k "$k" --raw-output '$k')
+    flake=$(jq --argjson k "$k" --raw-output '.flakes.[$k]' <<<"$json")
+
+    dest="$vendor/$name"
+
+    if [[ $verbose == true ]]; then
+        warn "copying flake $flake to $dest"
+    fi
+
+    rm --recursive --force "${rmflags[@]}" -- "$dest"
+
+    src=$(nix flake prefetch --json "${prefetchflags[@]}" -- "$flake" | jq --exit-status --raw-output '.storePath')
+
+    mkdir --parents "${mkdirflags[@]}" -- "$(dirname -- "$dest")"
+
+    cp --recursive --no-preserve all "${cpflags[@]}" -- "$src/." "$dest"
+done < <(jq '.flakes | keys[]' <<<"$json")
