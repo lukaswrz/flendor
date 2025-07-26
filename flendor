@@ -87,7 +87,7 @@ while IFS= read -r k; do
 
     src=$(nix "${nixflags[@]}" flake prefetch --json "${prefetchflags[@]}" -- "$flake" | jq --exit-status --raw-output '.storePath')
 
-    rsync --recursive --delete --update --mkpath "${rsyncflags[@]}" -- "$src/" "$dest"
+    rsync --recursive --delete --mkpath "${rsyncflags[@]}" -- "$src/" "$dest"
 done < <(jq '.flakes | keys[]' <<<"$json")
 
 for path in "$vendor"/{,.}*; do
