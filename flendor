@@ -4,6 +4,8 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
+shopt -s nullglob
+
 progname=$0
 
 warn() {
@@ -21,7 +23,7 @@ error() {
 
 args=$(
     getopt \
-        --options t:rv \
+        --options d:rv \
         --longoptions vendor:,refresh,verbose \
         --name "$progname" \
         -- "$@"
@@ -31,10 +33,8 @@ eval set -- "$args"
 
 nixflags=()
 rmflags=()
-mkdirflags=()
-cpflags=()
+rsyncflags=()
 prefetchflags=()
-verbose=false
 while true; do
     case $1 in
     -d | --vendor)
@@ -48,9 +48,7 @@ while true; do
     -v | --verbose)
         nixflags+=(--verbose)
         rmflags+=(--verbose)
-        mkdirflags+=(--verbose)
-        cpflags+=(--verbose)
-        verbose=true
+        rsyncflags+=(--verbose)
         shift
         ;;
     --)
@@ -70,21 +68,41 @@ if [[ ! -v vendor ]]; then
     vendor=$(jq --exit-status --raw-output '.vendor' <<<"$json")
 fi
 
+keeppaths=()
+
 while IFS= read -r k; do
     name=$(jq --null-input --argjson k "$k" --raw-output '$k')
+
+    if [[ $name =~ / ]]; then
+        error 'flake input name cannot contain slashes'
+    fi
+    
     flake=$(jq --argjson k "$k" --raw-output '.flakes.[$k]' <<<"$json")
 
     dest="$vendor/$name"
 
-    if [[ $verbose == true ]]; then
-        warn "copying flake $flake to $dest"
-    fi
+    keeppaths+=("$dest")
 
-    rm --recursive --force "${rmflags[@]}" -- "$dest"
+    warn "copying flake $flake to $dest"
 
-    src=$(nix flake prefetch --json "${prefetchflags[@]}" -- "$flake" | jq --exit-status --raw-output '.storePath')
+    src=$(nix "${nixflags[@]}" flake prefetch --json "${prefetchflags[@]}" -- "$flake" | jq --exit-status --raw-output '.storePath')
 
-    mkdir --parents "${mkdirflags[@]}" -- "$(dirname -- "$dest")"
-
-    cp --recursive --no-preserve all "${cpflags[@]}" -- "$src/." "$dest"
+    rsync --recursive --delete --update --mkpath "${rsyncflags[@]}" -- "$src/" "$dest"
 done < <(jq '.flakes | keys[]' <<<"$json")
+
+for path in "$vendor"/{,.}*; do
+    keep=0
+
+    for keeppath in "${keeppaths[@]}"; do
+        a=$(realpath --strip -- "$path")
+        b=$(realpath --strip -- "$keeppath")
+        if [[ $a == "$b" ]]; then
+            keep=1
+        fi
+    done
+
+    if (( ! keep )); then
+        warn "removing old flake at $path"
+        rm --recursive --force "${rmflags[@]}" -- "$path"
+    fi
+done

@@ -1,12 +1,14 @@
 {
   writeShellApplication,
   jq,
+  rsync,
 }:
 writeShellApplication {
-  name = "jq";
+  name = "flendor";
 
   runtimeInputs = [
     jq
+    rsync
   ];
 
   text = builtins.readFile ./flendor;
