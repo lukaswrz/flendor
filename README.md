@@ -38,3 +38,4 @@ $ ./flendor
 
 I don't know.
 I personally just use this to vendor my own flakes in my NixOS configuration, so that if my Forgejo server ever stops working, I still have the possibility to rebuild its configuration without much hassle.
+test
